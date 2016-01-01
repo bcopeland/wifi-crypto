@@ -29,15 +29,6 @@ def bin_cmp(b1, b2):
 def addr_to_bin(addr_str):
     return ''.join([chr(int(x, 16)) for x in addr_str.split(':')])
 
-def max_addr(addr1, addr2):
-    if bin_cmp(addr1, addr2) < 0:
-        return addr1
-    return addr2
-
-def min_addr(addr1, addr2):
-    other = max_addr(addr1, addr2)
-    return addr1 if addr2 == other else addr2
-
 def do_sae(curve, password, addr1, addr2, rand1, mask1, rand2, mask2):
 
     counter = 1
