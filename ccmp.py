@@ -73,6 +73,26 @@ def ccmp_decrypt(key, nonce, aad, data):
     test_mac = ccmp_mac(key, nonce, aad, pt)
     print 'VERIFY: %s' % binascii.hexlify(test_mac)
 
+def ccmp_frame_aad(frame):
+    fc, duration, a1, a2, a3, seq = struct.unpack_from("<HH6s6s6sH", frame, 0)
+
+    # mask subtype, only if not mgmt
+    if fc & 0x0c != 0:
+        fc &= ~0x70   # subtype bits 4,5,6
+
+    fc &= ~(
+        (1 << 11) |   # retry
+        (1 << 12) |   # PM
+        (1 << 13)     # More data
+        # TODO Order bit for qc frames
+    )
+    fc |= 1 << 14
+    # seq number subfield masked out
+    seq &= 0xf
+    # TODO A4 + QC
+    aad = struct.pack("<H6s6s6sH", fc, a1, a2, a3, seq)
+    print 'AAD: %s' % binascii.hexlify(aad)
+    return aad
 
 def ccmp_decrypt_frame(key, frame):
     mgmt = 1
@@ -91,9 +111,11 @@ def ccmp_decrypt_frame(key, frame):
 
     payload = frame[32:]
 
+    aad = ccmp_frame_aad(frame)
+
     pn = pn5 + pn4 + pn3 + pn2 + pn1 + pn0
     nonce = chr(nonce_flags) + addr2 + pn
-    ccmp_decrypt(key, nonce, None, payload)
+    ccmp_decrypt(key, nonce, aad, payload)
 
 def unspace(x):
     return x.replace(" ", "").replace("\n", "")
