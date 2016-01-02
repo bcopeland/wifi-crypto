@@ -102,7 +102,7 @@ if __name__ == "__main__":
 
     # MFP test
     key = binascii.unhexlify('84dce95f9fee1f91baeddd2077c56846')
-    frame = binascii.unhexlify('d040000000804863a2f830b5c21ab07330b5c21ab07300000100002000000000173a95ffd2d4d2bcbe85a381349f0380ad13288bad2dc5b27c50fec317e57fd0c78cd50bf8b9d579416edb1dab49dc')
+    frame = binascii.unhexlify('d040000000804863a2f830b5c21ab07330b5c21ab07300000100002000000000173a95ffd2d4d2bcbe85a381349f0380ad13288bad2dc5b27c50fec317e57fd0c78cd50bf8b9d579416edb')
     ccmp_decrypt_frame(key, frame)
 
     # test vectors from RFC 3610
