@@ -5,6 +5,7 @@ from Crypto.Cipher import AES
 from Crypto.Util import Counter
 import binascii
 import struct
+import sys
 
 # constants for 802.11
 M = 8
@@ -18,6 +19,10 @@ def bytes_to_int(s):
         ret |= ord(s[c]) << shift
         shift += 8
     return ret
+
+def frame_is_mgmt(frame):
+    fc, = struct.unpack_from("<H", frame, 0)
+    return fc & 0x0c == 0
 
 def ccmp_mac(key, nonce, aad, data):
     adata = 1 if aad else 0
@@ -45,8 +50,23 @@ def ccmp_mac(key, nonce, aad, data):
     return T[0:M]
 
 def ccmp_encrypt(key, nonce, aad, data):
-    pass
+    flags = L-1
+    iv = chr(flags) + nonce + "\x00\x01"
+    ctr = Counter.new(128, initial_value=bytes_to_int(iv))
+    aes = AES.new(key, AES.MODE_CTR, counter=ctr)
+    ct = aes.encrypt(data)
 
+    mac = ccmp_mac(key, nonce, aad, data)
+
+    iv = chr(flags) + nonce + "\x00\x00"
+    ctr = Counter.new(128, initial_value=bytes_to_int(iv))
+    aes = AES.new(key, AES.MODE_CTR, counter=ctr)
+    mac_crypt = aes.encrypt(mac)
+
+    print 'CT %s' % binascii.hexlify(ct)
+    print 'MAC %s' % binascii.hexlify(mac_crypt)
+
+    return ct, mac_crypt
 
 def ccmp_decrypt(key, nonce, aad, data):
 
@@ -66,18 +86,18 @@ def ccmp_decrypt(key, nonce, aad, data):
     ctr = Counter.new(128, initial_value=bytes_to_int(iv))
     aes = AES.new(key, AES.MODE_CTR, counter=ctr)
     mac = aes.decrypt(mac_crypt)
-
-    print 'PT: %s' % binascii.hexlify(pt)
-    print 'MAC: %s' % binascii.hexlify(mac)
-
     test_mac = ccmp_mac(key, nonce, aad, pt)
-    print 'VERIFY: %s' % binascii.hexlify(test_mac)
+
+    print 'PT %s' % binascii.hexlify(pt)
+    print 'MAC %s (== %s)' % (binascii.hexlify(mac), binascii.hexlify(test_mac))
+
+    return pt, mac
 
 def ccmp_frame_aad(frame):
     fc, duration, a1, a2, a3, seq = struct.unpack_from("<HH6s6s6sH", frame, 0)
 
     # mask subtype, only if not mgmt
-    if fc & 0x0c != 0:
+    if not frame_is_mgmt(frame):
         fc &= ~0x70   # subtype bits 4,5,6
 
     fc &= ~(
@@ -91,16 +111,9 @@ def ccmp_frame_aad(frame):
     seq &= 0xf
     # TODO A4 + QC
     aad = struct.pack("<H6s6s6sH", fc, a1, a2, a3, seq)
-    print 'AAD: %s' % binascii.hexlify(aad)
     return aad
 
-def ccmp_decrypt_frame(key, frame):
-    mgmt = 1
-    # ath5k does this...
-    # mgmt = 0
-    priority = 0
-    nonce_flags = mgmt << 4 | priority & 0xf
-    addr2 = frame[10:16]
+def ccmp_frame_pn(frame):
     ccmp_header = frame[24:24+8]
     pn0 = ccmp_header[0]
     pn1 = ccmp_header[1]
@@ -108,24 +121,48 @@ def ccmp_decrypt_frame(key, frame):
     pn3 = ccmp_header[5]
     pn4 = ccmp_header[6]
     pn5 = ccmp_header[7]
+    return pn0 + pn1 + pn2 + pn3 + pn4 + pn5
+
+def ccmp_decrypt_frame(key, frame):
+    mgmt = frame_is_mgmt(frame)
+
+    priority = 0
+    nonce_flags = mgmt << 4 | priority & 0xf
+    addr2 = frame[10:16]
+    pn = ccmp_frame_pn(frame)
+    pn = pn[::-1]
 
     payload = frame[32:]
 
     aad = ccmp_frame_aad(frame)
 
-    pn = pn5 + pn4 + pn3 + pn2 + pn1 + pn0
     nonce = chr(nonce_flags) + addr2 + pn
-    ccmp_decrypt(key, nonce, aad, payload)
+    pt, mac = ccmp_decrypt(key, nonce, aad, payload)
+
+    return frame[0:24] + pt
+
+def ccmp_encrypt_frame(key, frame, pn):
+    mgmt = frame_is_mgmt(frame)
+
+    priority = 0
+    nonce_flags = mgmt << 4 | priority & 0xf
+    addr2 = frame[10:16]
+
+    payload = frame[24:]
+    aad = ccmp_frame_aad(frame)
+
+    rev_pn = pn[::-1]
+    nonce = chr(nonce_flags) + addr2 + rev_pn
+    ct, mac = ccmp_encrypt(key, nonce, aad, payload)
+
+    # todo: keyid
+    ccmp_header = pn[0] + pn[1] + '\0' + chr(1 << 6) + pn[2:]
+    return frame[0:24] + ccmp_header + ct + mac
 
 def unspace(x):
     return x.replace(" ", "").replace("\n", "")
 
 if __name__ == "__main__":
-
-    # MFP test
-    key = binascii.unhexlify('84dce95f9fee1f91baeddd2077c56846')
-    frame = binascii.unhexlify('d040000000804863a2f830b5c21ab07330b5c21ab07300000100002000000000173a95ffd2d4d2bcbe85a381349f0380ad13288bad2dc5b27c50fec317e57fd0c78cd50bf8b9d579416edb')
-    ccmp_decrypt_frame(key, frame)
 
     # test vectors from RFC 3610
     # key, nonce, aad, ptext, ctext
@@ -144,4 +181,11 @@ if __name__ == "__main__":
 
     for test in tests:
         (key, nonce, aad, ptext, ctext) = [binascii.unhexlify(unspace(x)) for x in test]
-        ccmp_decrypt(key, nonce, aad, ctext)
+        ct, e_mac = ccmp_encrypt(key, nonce, aad, ptext)
+        pt, d_mac = ccmp_decrypt(key, nonce, aad, ctext)
+
+        ct_check = ct + e_mac
+        pt_check = pt
+
+        assert pt_check == ptext and ct_check == ctext
+
