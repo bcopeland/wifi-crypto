@@ -11,6 +11,8 @@ import sys
 M = 8
 L = 2
 
+emulate_ath5k = True
+
 def bytes_to_int(s):
     """ Supports arbitrary sized positive bytestrings """
     ret = 0
@@ -126,6 +128,9 @@ def ccmp_frame_pn(frame):
 def ccmp_decrypt_frame(key, frame):
     mgmt = frame_is_mgmt(frame)
 
+    if emulate_ath5k:
+        mgmt = 0
+
     priority = 0
     nonce_flags = mgmt << 4 | priority & 0xf
     addr2 = frame[10:16]
@@ -143,6 +148,9 @@ def ccmp_decrypt_frame(key, frame):
 
 def ccmp_encrypt_frame(key, frame, pn):
     mgmt = frame_is_mgmt(frame)
+
+    if emulate_ath5k:
+        mgmt = 0
 
     priority = 0
     nonce_flags = mgmt << 4 | priority & 0xf
@@ -163,6 +171,25 @@ def unspace(x):
     return x.replace(" ", "").replace("\n", "")
 
 if __name__ == "__main__":
+
+    # MFP test
+    # key = binascii.unhexlify('84dce95f9fee1f91baeddd2077c56846')
+    # frame = binascii.unhexlify('d040000000804863a2f830b5c21ab07330b5c21ab07300000100002000000000173a95ffd2d4d2bcbe85a381349f0380ad13288bad2dc5b27c50fec317e57fd0c78cd50bf8b9d579416edb')
+
+    # print "Crypt Framelen: %d" % len(frame)
+
+    # orig_pn = ccmp_frame_pn(frame)
+
+    # unenc_frame = ccmp_decrypt_frame(key, frame)
+    # print "Wrongly decrypted frame: (%d) %s" % (len(unenc_frame), binascii.hexlify(unenc_frame))
+
+    # reenc_frame = ccmp_encrypt_frame(key, unenc_frame, orig_pn)
+    # print "Reencrypted frame: (%d) %s" % (len(reenc_frame), binascii.hexlify(reenc_frame))
+
+    # emulate_ath5k = False
+    # unenc_frame2 = ccmp_decrypt_frame(key, reenc_frame)
+    # print "Properly decrypted frame: (%d) %s" % (len(unenc_frame2), binascii.hexlify(unenc_frame2))
+
 
     # test vectors from RFC 3610
     # key, nonce, aad, ptext, ctext
